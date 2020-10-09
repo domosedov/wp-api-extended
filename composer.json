@@ -1,0 +1,18 @@
+{
+    "name": "domosedov/wp-api-extended",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Aleksandr Grigorii",
+            "email": "domosedov.dev@gmail.com"
+        }
+    ],
+    "require": {
+        "firebase/php-jwt": "^5.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "Domosedov\\API\\": "src/api-extended"
+        }
+    }
+}
