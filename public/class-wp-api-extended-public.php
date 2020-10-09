@@ -102,7 +102,7 @@ class Wp_Api_Extended_Public {
 
 	public function register_routes()
     {
-        $registerController = new Domosedov\API\Routes\Register();
+        $registerController = new Domosedov\API\Routes\Register($this->plugin_name, $this->version);
         $registerController->register_routes();
     }
 
