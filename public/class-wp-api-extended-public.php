@@ -104,6 +104,9 @@ class Wp_Api_Extended_Public {
     {
         $registerController = new Domosedov\API\Routes\Register($this->plugin_name, $this->version);
         $registerController->register_routes();
+
+	    $resetController = new Domosedov\API\Routes\Password($this->plugin_name, $this->version);
+	    $resetController->register_routes();
     }
 
 }
