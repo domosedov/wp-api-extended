@@ -8,7 +8,8 @@
         }
     ],
     "require": {
-        "firebase/php-jwt": "^5.2"
+        "firebase/php-jwt": "^5.2",
+        "ramsey/uuid": "^4.1"
     },
     "autoload": {
         "psr-4": {

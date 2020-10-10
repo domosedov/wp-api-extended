@@ -17,7 +17,7 @@ Routes:
 /<namespace>/v<version>/register
 /<namespace>/v<version>/password/forgot
 /<namespace>/v<version>/password/reset
-/<namespace>/v<version>/password/new
+/<namespace>/v<version>/password/change
 
 
 This is the long description.  No limit, and you can use Markdown (as well as in the following sections).

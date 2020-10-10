@@ -153,12 +153,7 @@ class Wp_Api_Extended {
 	 * @access   private
 	 */
 	private function define_admin_hooks() {
-
 		$plugin_admin = new Wp_Api_Extended_Admin( $this->get_plugin_name(), $this->get_version() );
-
-		$this->loader->add_action( 'admin_enqueue_scripts', $plugin_admin, 'enqueue_styles' );
-		$this->loader->add_action( 'admin_enqueue_scripts', $plugin_admin, 'enqueue_scripts' );
-
 	}
 
 	/**
@@ -169,13 +164,12 @@ class Wp_Api_Extended {
 	 * @access   private
 	 */
 	private function define_public_hooks() {
-
 		$plugin_public = new Wp_Api_Extended_Public( $this->get_plugin_name(), $this->get_version() );
 
-		$this->loader->add_action( 'wp_enqueue_scripts', $plugin_public, 'enqueue_styles' );
-		$this->loader->add_action( 'wp_enqueue_scripts', $plugin_public, 'enqueue_scripts' );
-
+		$this->loader->add_action( 'init', $plugin_public, 'register_user_meta');
 		$this->loader->add_action( 'rest_api_init', $plugin_public, 'register_routes');
+		$this->loader->add_filter('rest_api_init', $plugin_public, 'add_cors_support');
+		$this->loader->add_filter('determine_current_user', $plugin_public, 'determine_current_user', 10);
 	}
 
 	/**

@@ -40,17 +40,17 @@ class Password extends WP_REST_Controller {
 
 		register_rest_route( $this->namespace, "/$this->rest_base/reset", [
 			'methods'             => WP_REST_Server::EDITABLE,
-			'callback'            => [ $this, 'create_item' ],
-			'permission_callback' => [ $this, 'create_item_permissions_check' ],
+			'callback'            => [ $this, 'reset_password' ],
+			'permission_callback' => [ $this, 'reset_password_permissions_check' ],
 			'args'                => [
-				'login' => [
+				'login'       => [
 					'description'       => __( 'User login' ),
 					'type'              => 'string',
 					'required'          => true,
 					'validate_callback' => [ $this, 'validate_args' ],
 					'sanitize_callback' => [ $this, 'sanitize_args' ],
 				],
-				'resetCode' => [
+				'resetKey'    => [
 					'description'       => __( 'Reset password key' ),
 					'type'              => 'string',
 					'required'          => true,
@@ -69,10 +69,10 @@ class Password extends WP_REST_Controller {
 
 		register_rest_route( $this->namespace, "/$this->rest_base/change", [
 			'methods'             => WP_REST_Server::EDITABLE,
-			'callback'            => [ $this, 'create_item' ],
-			'permission_callback' => [ $this, 'create_item_permissions_check' ],
+			'callback'            => [ $this, 'change_password' ],
+			'permission_callback' => [ $this, 'change_password_permissions_check' ],
 			'args'                => [
-				'login' => [
+				'login'       => [
 					'description'       => __( 'User login' ),
 					'type'              => 'string',
 					'required'          => true,
@@ -115,19 +115,27 @@ class Password extends WP_REST_Controller {
 		return $value;
 	}
 
+	public function validate_email( $email ) {
+		return is_email( $email );
+	}
+
+	public function sanitize_email( $email ) {
+		return sanitize_email( $email );
+	}
+
 	public function forgot_password_permissions_check( $request ) {
 		return true;
 	}
 
 	/**
-	 * Create new user
+	 * Create and send reset code
 	 *
 	 * @param WP_REST_Request $request
 	 *
 	 * @return WP_Error|WP_REST_Response
 	 */
 	public function forgot_password( $request ) {
-		$email     = $request->get_param( 'email' );
+		$email = $request->get_param( 'email' );
 
 		if ( email_exists( $email ) ) {
 			$user = get_user_by( 'email', $email );
@@ -148,7 +156,7 @@ Login: %1$s
 Reset code: %2$s'
 					);
 
-					$is_sent = wp_mail( $email, __( 'Password reset link' ), sprintf($message, $login, $reset_key) );
+					$is_sent = wp_mail( $email, __( 'Password reset link' ), sprintf( $message, $login, $reset_key ) );
 
 					if ( empty( $is_sent ) ) {
 						return new WP_Error(
@@ -168,11 +176,107 @@ Reset code: %2$s'
 		return rest_ensure_response( $response );
 	}
 
-	public function validate_email( $email ) {
-		return is_email( $email );
+	public function reset_password_permissions_check( $request ) {
+		return true;
 	}
 
-	public function sanitize_email( $email ) {
-		return sanitize_email( $email );
+	public function reset_password( $request ) {
+		$login        = $request->get_param( 'login' );
+		$reset_key    = $request->get_param( 'resetKey' );
+		$new_password = $request->get_param( 'newPassword' );
+
+		$user = check_password_reset_key( $reset_key, $login );
+
+		if ( is_wp_error( $user ) ) {
+			return new WP_Error(
+				'rest_reset_password_failed',
+				__( 'Invalid login or reset key.' ),
+				[ 'status' => 400 ]
+			);
+		}
+
+		wp_set_password( $new_password, $user->ID );
+
+		$message = __(
+			'Hello, %1$s.
+						
+Your password has been changed.'
+		);
+
+		$is_sent = wp_mail( $user->user_email, __( 'Password reset link' ), sprintf( $message, $login ) );
+
+		if ( empty( $is_sent ) ) {
+			return new WP_Error(
+				'rest_reset_password_send_mail_failed',
+				__( 'Send mail error.' ),
+				[ 'status' => 400 ]
+			);
+		}
+
+		$response = apply_filters( 'api_extended_reset_password_response', [
+			'message' => __( 'Your password has been changed.' )
+		] );
+
+		return rest_ensure_response( $response );
+	}
+
+	public function change_password_permissions_check( $request ) {
+
+		/*
+		 * JWT Auth
+		 */
+
+		return is_user_logged_in();
+	}
+
+	public function change_password( $request ) {
+		$login        = $request->get_param( 'login' );
+		$old_password = $request->get_param( 'oldPassword' );
+		$new_password = $request->get_param( 'newPassword' );
+
+		$user = get_user_by( 'login', $login );
+
+		if ( empty( $user ) ) {
+			return new WP_Error(
+				'rest_change_password_failed',
+				__( 'User not found' ),
+				[ 'status' => 400 ]
+			);
+		}
+
+		$hash = $user->user_pass;
+
+		if ( wp_check_password( $old_password, $hash, $user->ID ) ) {
+
+			wp_set_password( $new_password, $user->ID );
+
+			$message = __(
+				'Hello, %1$s.
+						
+Your password has been changed.'
+			);
+
+			$is_sent = wp_mail( $user->user_email, __( 'Password reset link' ), sprintf( $message, $login ) );
+
+			if ( empty( $is_sent ) ) {
+				return new WP_Error(
+					'rest_change_password_send_mail_failed',
+					__( 'Send mail error.' ),
+					[ 'status' => 400 ]
+				);
+			}
+
+			$response = apply_filters( 'api_extended_change_password_response', [
+				'message' => __( 'Your password has been changed.' )
+			] );
+
+			return rest_ensure_response( $response );
+		} else {
+			return new WP_Error(
+				'rest_change_password_failed',
+				__( 'Invalid password' ),
+				[ 'status' => 400 ]
+			);
+		}
 	}
 }

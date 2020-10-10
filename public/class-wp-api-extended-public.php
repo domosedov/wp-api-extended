@@ -1,102 +1,17 @@
 <?php
 
-/**
- * The public-facing functionality of the plugin.
- *
- * @link       domosedev.info
- * @since      1.0.0
- *
- * @package    Wp_Api_Extended
- * @subpackage Wp_Api_Extended/public
- */
+use Ramsey\Uuid\Uuid;
+use Firebase\JWT\JWT;
 
-/**
- * The public-facing functionality of the plugin.
- *
- * Defines the plugin name, version, and two examples hooks for how to
- * enqueue the public-facing stylesheet and JavaScript.
- *
- * @package    Wp_Api_Extended
- * @subpackage Wp_Api_Extended/public
- * @author     Aleksandr Grigorii <domosedov.dev@gmail.com>
- */
 class Wp_Api_Extended_Public {
 
-	/**
-	 * The ID of this plugin.
-	 *
-	 * @since    1.0.0
-	 * @access   private
-	 * @var      string    $plugin_name    The ID of this plugin.
-	 */
 	private $plugin_name;
-
-	/**
-	 * The version of this plugin.
-	 *
-	 * @since    1.0.0
-	 * @access   private
-	 * @var      string    $version    The current version of this plugin.
-	 */
 	private $version;
 
-	/**
-	 * Initialize the class and set its properties.
-	 *
-	 * @since    1.0.0
-	 * @param      string    $plugin_name       The name of the plugin.
-	 * @param      string    $version    The version of this plugin.
-	 */
 	public function __construct( $plugin_name, $version ) {
 
 		$this->plugin_name = $plugin_name;
 		$this->version = $version;
-
-	}
-
-	/**
-	 * Register the stylesheets for the public-facing side of the site.
-	 *
-	 * @since    1.0.0
-	 */
-	public function enqueue_styles() {
-
-		/**
-		 * This function is provided for demonstration purposes only.
-		 *
-		 * An instance of this class should be passed to the run() function
-		 * defined in Wp_Api_Extended_Loader as all of the hooks are defined
-		 * in that particular class.
-		 *
-		 * The Wp_Api_Extended_Loader will then create the relationship
-		 * between the defined hooks and the functions defined in this
-		 * class.
-		 */
-
-		wp_enqueue_style( $this->plugin_name, plugin_dir_url( __FILE__ ) . 'css/wp-api-extended-public.css', array(), $this->version, 'all' );
-
-	}
-
-	/**
-	 * Register the JavaScript for the public-facing side of the site.
-	 *
-	 * @since    1.0.0
-	 */
-	public function enqueue_scripts() {
-
-		/**
-		 * This function is provided for demonstration purposes only.
-		 *
-		 * An instance of this class should be passed to the run() function
-		 * defined in Wp_Api_Extended_Loader as all of the hooks are defined
-		 * in that particular class.
-		 *
-		 * The Wp_Api_Extended_Loader will then create the relationship
-		 * between the defined hooks and the functions defined in this
-		 * class.
-		 */
-
-		wp_enqueue_script( $this->plugin_name, plugin_dir_url( __FILE__ ) . 'js/wp-api-extended-public.js', array( 'jquery' ), $this->version, false );
 
 	}
 
@@ -107,6 +22,164 @@ class Wp_Api_Extended_Public {
 
 	    $resetController = new Domosedov\API\Routes\Password($this->plugin_name, $this->version);
 	    $resetController->register_routes();
+
+	    $loginController = new Domosedov\API\Routes\Login($this->plugin_name, $this->version);
+	    $loginController->register_routes();
     }
 
+    public function register_user_meta()
+    {
+    	$args = [
+			'type' => 'array',
+		    'description' => __('User JWT refresh sessions'),
+		    'single' => true,
+		    'default' => [],
+		    'show_in_rest' => false
+	    ];
+
+    	$is_success = register_meta('user', 'jwt_refresh_sessions', $args);
+
+    	if (!$is_success) {
+    		return new WP_Error(
+			    'register_user_meta_error',
+			    __('Can\'t create user meta'),
+			    ['status' => 500]
+		    );
+	    }
+    }
+
+    public function add_cors_support()
+    {
+	    $enable_cors = defined('API_EXTENDED_CORS') ? API_EXTENDED_CORS : false;
+	    if ($enable_cors) {
+		    $headers = apply_filters('api_extended_auth_cors_allow_headers', 'Access-Control-Allow-Headers, Content-Type, Authorization');
+		    header(sprintf('Access-Control-Allow-Headers: %s', $headers));
+	    }
+    }
+
+    public function determine_current_user($user)
+    {
+    	if ($user !== false) {
+    		return $user;
+	    }
+
+	    $rest_api_slug = rest_get_url_prefix();
+	    $valid_api_uri = strpos($_SERVER['REQUEST_URI'], $rest_api_slug);
+	    if (!$valid_api_uri) {
+		    return $user;
+	    }
+
+	    $auth_header = isset( $_SERVER['HTTP_AUTHORIZATION'] ) ? $_SERVER['HTTP_AUTHORIZATION'] : false;
+
+	    /**
+	     * Double check for different auth header string (server dependent)
+	     */
+	    $redirect_auth_header = isset( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ) ? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] : false;
+
+	    /**
+	     * If the $auth header is set, use it. Otherwise attempt to use the $redirect_auth header
+	     */
+	    $auth_header = $auth_header !== false ? $auth_header : ( $redirect_auth_header !== false ? $redirect_auth_header : null );
+
+	    if (!$auth_header) {
+	    	return $user;
+	    }
+
+	    list( $token ) = sscanf( $auth_header, 'Bearer %s' );
+
+	    try {
+	    	$token = JWT::decode($token, API_EXTENDED_JWT_SECRET, ['HS256']);
+	    } catch (Exception $e) {
+		    return new WP_Error(
+			    'rest_register_create_error',
+			    __($e->getMessage()),
+			    ['status' => 400]
+		    );
+	    }
+
+		return $token->data->user->id;
+    }
+
+    public static function login_and_get_token($request)
+    {
+    	$login = $request->get_param( 'login' );
+    	$password = $request->get_param( 'password' );
+    	$secret_key = defined('API_EXTENDED_JWT_SECRET') ? API_EXTENDED_JWT_SECRET : false;
+
+    	if (!$secret_key) {
+		    return new WP_Error(
+			    'rest_auth_login_error',
+			    __('Cant\'t authenticate user. Bad settings'),
+			    ['status' => 403]
+		    );
+	    }
+
+    	$user = wp_authenticate($login, $password);
+
+    	if (is_wp_error($user)) {
+		    return new WP_Error(
+			    'rest_auth_login_error',
+			    __('Bad credentials'),
+			    ['status' => 403]
+		    );
+	    }
+
+    	$issued_at = time();
+    	$not_before = time();
+    	$expired_at = $issued_at + DAY_IN_SECONDS;
+
+    	$args = [
+    	    'iss' => get_bloginfo('url'),
+		    'iat' => $issued_at,
+		    'nbf' => $not_before,
+		    'exp' => $expired_at,
+		    'data' => [
+		    	'user' => [
+		    		'id' => $user->ID
+			    ]
+		    ]
+	    ];
+
+    	$token = JWT::encode($args, $secret_key);
+	    $uuid = Uuid::uuid4();
+	    $refresh_token = $uuid->toString();
+
+	    $user_jwt_refresh_sessions = get_user_meta($user->ID, 'jwt_refresh_sessions', true);
+
+	    if (!is_array($user_jwt_refresh_sessions) || empty($user_jwt_refresh_sessions)) {
+		    $user_jwt_refresh_sessions = [];
+	    }
+
+	    $new_jwt_refresh_session = [
+	    	'refresh_token' => $refresh_token,
+		    'ip' => 'user ip',
+		    'fingerprint' => 'fingerprint 1'
+	    ];
+
+	    $user_jwt_refresh_sessions[] = $new_jwt_refresh_session;
+
+	    $is_updated = update_user_meta($user->ID, 'jwt_refresh_sessions', $user_jwt_refresh_sessions);
+
+	    if (!$is_updated) {
+		    return new WP_Error(
+			    'rest_auth_create_refresh_session_error',
+			    __('Can\'t create user jwt refresh session'),
+			    ['status' => 500]
+		    );
+	    }
+
+    	$response = rest_ensure_response([
+		    'id' => $user->ID,
+		    'login' => $user->user_login,
+		    'displayName' => $user->display_name,
+		    'token' => $token,
+		    'refreshToken' => $refresh_token
+	    ]);
+
+    	$response->set_headers([
+    		'Set-Cookie' => sprintf('refreshToken=%s; Path=/wp-json; HttpOnly', $refresh_token)
+	    ]);
+
+		return $response;
+    }
 }
