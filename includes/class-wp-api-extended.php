@@ -169,7 +169,7 @@ class Wp_Api_Extended {
 		$this->loader->add_action( 'init', $plugin_public, 'register_user_meta');
 		$this->loader->add_action( 'rest_api_init', $plugin_public, 'register_routes');
 		$this->loader->add_filter('rest_api_init', $plugin_public, 'add_cors_support');
-		$this->loader->add_filter('determine_current_user', $plugin_public, 'determine_current_user', 10);
+		$this->loader->add_filter('determine_current_user', $plugin_public, 'determine_current_user', 99);
 	}
 
 	/**

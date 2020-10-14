@@ -69,24 +69,38 @@ class Wp_Api_Extended_Public {
 		    return $user;
 	    }
 
+	    /**
+	     * Получаем заголовок авторизации
+	     */
 	    $auth_header = isset( $_SERVER['HTTP_AUTHORIZATION'] ) ? $_SERVER['HTTP_AUTHORIZATION'] : false;
 
 	    /**
-	     * Double check for different auth header string (server dependent)
+	     * Получаем заголовок авторизации в редиректе
 	     */
 	    $redirect_auth_header = isset( $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ) ? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] : false;
 
 	    /**
-	     * If the $auth header is set, use it. Otherwise attempt to use the $redirect_auth header
+	     * Проеверяем, есть ли значение в заголовке авторизации
 	     */
 	    $auth_header = $auth_header !== false ? $auth_header : ( $redirect_auth_header !== false ? $redirect_auth_header : null );
 
+	    /**
+	     * Если нет, то возвращаем false - пользователь не авторизован
+	     */
 	    if (!$auth_header) {
 	    	return $user;
 	    }
 
+	    /**
+	     * Получаем токен из заголовка
+	     */
 	    list( $token ) = sscanf( $auth_header, 'Bearer %s' );
 
+	    /**
+	     * Пробуем декодировать JWT-токен
+	     * Если токен валидный, возвращем ID пользователя и аутентифицируем его,
+	     * иначе возвращем ошибку
+	     */
 	    try {
 	    	$token = JWT::decode($token, API_EXTENDED_JWT_SECRET, ['HS256']);
 	    } catch (Exception $e) {
@@ -100,86 +114,4 @@ class Wp_Api_Extended_Public {
 		return $token->data->user->id;
     }
 
-    public static function login_and_get_token($request)
-    {
-    	$login = $request->get_param( 'login' );
-    	$password = $request->get_param( 'password' );
-    	$secret_key = defined('API_EXTENDED_JWT_SECRET') ? API_EXTENDED_JWT_SECRET : false;
-
-    	if (!$secret_key) {
-		    return new WP_Error(
-			    'rest_auth_login_error',
-			    __('Cant\'t authenticate user. Bad settings'),
-			    ['status' => 403]
-		    );
-	    }
-
-    	$user = wp_authenticate($login, $password);
-
-    	if (is_wp_error($user)) {
-		    return new WP_Error(
-			    'rest_auth_login_error',
-			    __('Bad credentials'),
-			    ['status' => 403]
-		    );
-	    }
-
-    	$issued_at = time();
-    	$not_before = time();
-    	$expired_at = $issued_at + DAY_IN_SECONDS;
-
-    	$args = [
-    	    'iss' => get_bloginfo('url'),
-		    'iat' => $issued_at,
-		    'nbf' => $not_before,
-		    'exp' => $expired_at,
-		    'data' => [
-		    	'user' => [
-		    		'id' => $user->ID
-			    ]
-		    ]
-	    ];
-
-    	$token = JWT::encode($args, $secret_key);
-	    $uuid = Uuid::uuid4();
-	    $refresh_token = $uuid->toString();
-
-	    $user_jwt_refresh_sessions = get_user_meta($user->ID, 'jwt_refresh_sessions', true);
-
-	    if (!is_array($user_jwt_refresh_sessions) || empty($user_jwt_refresh_sessions)) {
-		    $user_jwt_refresh_sessions = [];
-	    }
-
-	    $new_jwt_refresh_session = [
-	    	'refresh_token' => $refresh_token,
-		    'ip' => 'user ip',
-		    'fingerprint' => 'fingerprint 1'
-	    ];
-
-	    $user_jwt_refresh_sessions[] = $new_jwt_refresh_session;
-
-	    $is_updated = update_user_meta($user->ID, 'jwt_refresh_sessions', $user_jwt_refresh_sessions);
-
-	    if (!$is_updated) {
-		    return new WP_Error(
-			    'rest_auth_create_refresh_session_error',
-			    __('Can\'t create user jwt refresh session'),
-			    ['status' => 500]
-		    );
-	    }
-
-    	$response = rest_ensure_response([
-		    'id' => $user->ID,
-		    'login' => $user->user_login,
-		    'displayName' => $user->display_name,
-		    'token' => $token,
-		    'refreshToken' => $refresh_token
-	    ]);
-
-    	$response->set_headers([
-    		'Set-Cookie' => sprintf('refreshToken=%s; Path=/wp-json; HttpOnly', $refresh_token)
-	    ]);
-
-		return $response;
-    }
 }
